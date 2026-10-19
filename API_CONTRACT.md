@@ -479,8 +479,25 @@ The frontend services in `src/services/` (`employeeService.ts`, `insuranceServic
     "status": "paid"
   }
   ```
-- **`PUT /api/driver-payouts/transactions/:id`**: Update transaction details and re-aggregate weekly summary.
 - **`DELETE /api/driver-payouts/transactions/:id`**: Delete transaction and re-aggregate weekly summary.
+  - **Success Response (200 OK)**:
+    ```json
+    {
+      "success": true,
+      "message": "تم حذف دفعة القبض بنجاح",
+      "data": {
+        "id": "tx-12345",
+        "weekPeriod": "2026-10-18"
+      }
+    }
+    ```
+  - **Not Found Response (404 Not Found)**:
+    ```json
+    {
+      "success": false,
+      "message": "المعاملة غير موجودة"
+    }
+    ```
 
 ### 11.4. Weekly Matrix Representation (`/api/driver-payouts/matrix/:weekPeriod`)
 - **`GET /api/driver-payouts/matrix/:weekPeriod`**: Returns full aggregated spreadsheet-like matrix representation (`{ columns, maxRows, summary }`) for Excel grid viewing.

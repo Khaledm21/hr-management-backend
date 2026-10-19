@@ -342,16 +342,21 @@ export class DriverPayoutsService {
       where: { id },
     });
 
-    if (!existing) return false;
+    if (!existing) return null;
+
+    const weekPeriod = existing.weekPeriod;
 
     await prisma.driverPayoutTransaction.delete({
       where: { id },
     });
 
     // Recalculate summary
-    await this.recalculateSummary(existing.weekPeriod);
+    await this.recalculateSummary(weekPeriod);
 
-    return true;
+    return {
+      id: existing.id,
+      weekPeriod,
+    };
   }
 
   /**

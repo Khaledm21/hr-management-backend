@@ -107,20 +107,37 @@ export class DriverPayoutsController {
 
   async deleteTransaction(req: Request, res: Response, next: NextFunction) {
     try {
-      const id = req.params.id as string;
-      const success = await driverPayoutsService.deleteTransaction(id);
-      if (!success) {
-        return res.status(404).json({
+      const id = (req.params.id as string)?.trim();
+      if (!id) {
+        return res.status(400).json({
           success: false,
-          message: 'الحركة غير موجودة (Transaction not found)',
+          message: 'معرف دفعة القبض مطلوب (Transaction ID is required)',
         });
       }
-      return res.json({
+
+      const result = await driverPayoutsService.deleteTransaction(id);
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          message: 'المعاملة غير موجودة',
+        });
+      }
+
+      return res.status(200).json({
         success: true,
-        message: 'تم حذف حركة القبض وتحديث إجماليات الأسبوع بنجاح',
+        message: 'تم حذف دفعة القبض بنجاح',
+        data: {
+          id: result.id,
+          weekPeriod: result.weekPeriod,
+        },
       });
-    } catch (err) {
-      return next(err);
+    } catch (error: any) {
+      console.error('Error deleting driver payout transaction:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'فشل حذف دفعة القبض',
+        error: error.message,
+      });
     }
   }
 
