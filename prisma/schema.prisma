@@ -1,0 +1,290 @@
+// Prisma Schema for Enterprise HR Management System
+// Compatible with SQLite (default local) and PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Departments Table
+model Department {
+  id            String     @id
+  code          String     @unique
+  name          String
+  nameAr        String
+  nameZh        String
+  managerId     String?
+  managerName   String?
+  employeeCount Int        @default(0)
+  location      String?
+  budget        Float      @default(0.0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  positions     Position[]
+  employees     Employee[]
+
+  @@map("departments")
+}
+
+// 2. Positions Table
+model Position {
+  id             String     @id
+  code           String     @unique
+  title          String
+  titleAr        String
+  titleZh        String
+  departmentId   String
+  departmentName String?
+  minSalary      Float      @default(0.0)
+  maxSalary      Float      @default(0.0)
+  level          String     @default("Mid")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  department     Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  employees      Employee[]
+
+  @@map("positions")
+}
+
+// 3. Employees Table
+model Employee {
+  id                             String           @id
+  employeeId                     String           @unique
+  firstName                      String
+  lastName                       String
+  arabicName                     String?
+  chineseName                    String?
+  email                          String?          @unique
+  phone                          String?
+  avatar                         String?
+  nationalId                     String           @unique
+  dateOfBirth                    String?
+  gender                         String?
+  nationality                    String?          @default("Egyptian")
+  address                        String?
+  emergencyContact               String?          // JSON string
+  departmentId                   String
+  departmentName                 String
+  positionId                     String
+  positionTitle                  String
+  chinesePosition                String?
+  managerId                      String?
+  managerName                    String?
+  employmentStatus               String           @default("active")
+  employmentType                 String           @default("full_time")
+  hireDate                       String
+  probationEndDate               String?
+  resignationDate                String?
+  workLocation                   String?          @default("Main Facility")
+  basicSalary                    Float            @default(4325.0)
+  housingAllowance               Float            @default(0.0)
+  transportAllowance             Float            @default(0.0)
+  contractStatus                 String           @default("active")
+  documentCompletenessPercentage Int              @default(100)
+  missingDocumentsCount          Int              @default(0)
+
+  // Social Insurance Fields
+  insuranceStatus                String           @default("not_insured")
+  insuranceNumber                String?
+  insuranceSalary                Float?           @default(4325.0)
+  workerShare                    Float?           @default(475.85)
+  companyShare                   Float?           @default(811.13)
+  insuranceNote                  String?
+
+  // Hiring Documents Checklist
+  qualificationCertificateStatus String           @default("missing")
+  birthCertificateStatus         String           @default("missing")
+  idCardStatus                   String           @default("missing")
+  contractDocStatus              String           @default("missing")
+  documentChecklistStatus        String           @default("incomplete")
+  missingNotes                   String?
+
+  createdAt                      DateTime         @default(now())
+  updatedAt                      DateTime         @updatedAt
+
+  department                     Department       @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  position                       Position         @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  documents                      DocumentRecord[]
+  contracts                      Contract[]
+
+  @@map("employees")
+}
+
+// 4. Social Insurance Table
+model SocialInsurance {
+  id                 String   @id
+  serialNo           Int
+  nationalId         String
+  employeeName       String
+  department         String
+  insuranceNumber    String
+  insuranceSalary    Float    @default(4325.0)
+  workerShare        Float    @default(475.85)
+  companyShare       Float    @default(811.13)
+  totalContribution  Float    @default(1286.98)
+  note               String?
+  employeeListStatus String   @default("found") // "found" | "not_found"
+  employeeCode       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([nationalId])
+  @@index([insuranceNumber])
+  @@index([employeeListStatus])
+  @@map("social_insurance")
+}
+
+// 5. Missing Documents Table
+model EmployeeMissingDocument {
+  id                String   @id
+  serialNo          Int
+  department        String
+  employeeName      String
+  nationalId        String
+  position          String
+  startDate         String?
+  resignationDate   String?
+  employeeCode      String
+  insuranceStatus   String   @default("not_insured")
+  qualificationCert String   @default("missing")
+  birthCert         String   @default("missing")
+  idCard            String   @default("missing")
+  contract          String   @default("missing")
+  missingCount      Int      @default(4)
+  notes             String?
+  status            String   @default("incomplete")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([employeeCode])
+  @@index([status])
+  @@map("employee_missing_documents")
+}
+
+// 6. Document Uploads Table
+model DocumentRecord {
+  id              String   @id
+  employeeId      String
+  employeeName    String
+  department      String
+  type            String
+  title           String
+  fileName        String
+  fileUrl         String
+  fileSize        String?
+  status          String   @default("under_review")
+  expiryDate      String?
+  uploadedAt      String?
+  verifiedAt      String?
+  verifiedBy      String?
+  notes           String?
+  rejectionReason String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("document_records")
+}
+
+// 7. Contracts Table
+model Contract {
+  id               String   @id
+  contractNumber   String   @unique
+  employeeId       String
+  employeeCode     String
+  employeeName     String
+  department       String
+  type             String   @default("fixed_term")
+  startDate        String
+  endDate          String
+  status           String   @default("active")
+  salary           Float
+  noticePeriodDays Int      @default(30)
+  renewalCount     Int      @default(0)
+  termsSummary     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("contracts")
+}
+
+// 8. Drivers Table (سجل السائقين والأسطول)
+model Driver {
+  id              String                    @id
+  code            String                    @unique
+  name            String
+  phone           String?
+  nationalId      String?                   @map("national_id")
+  vehicleNumber   String?                   @map("vehicle_number")
+  vehicleType     String?                   @default("جامبو 7000") @map("vehicle_type")
+  defaultCategory String                    @default("production") @map("default_category")
+  status          String                    @default("active")
+  joinedDate      String?                   @map("joined_date")
+  notes           String?
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+
+  transactions    DriverPayoutTransaction[]
+
+  @@index([code])
+  @@map("drivers")
+}
+
+// 9. Weekly Payout Summaries (دورات وملخصات القبض الأسبوعية)
+model WeeklyPayoutSummary {
+  weekPeriod      String                    @id @map("week_period")
+  weekLabel       String                    @map("week_label")
+  date            String                    @map("date")
+  totalDrivers    Int                       @default(0) @map("total_drivers")
+  totalAmount     Float                     @default(0.0) @map("total_amount")
+  totalOperations Int                       @default(0) @map("total_operations")
+  averagePayout   Float                     @default(0.0) @map("average_payout")
+  managementTotal Float                     @default(0.0) @map("management_total")
+  productionTotal Float                     @default(0.0) @map("production_total")
+  status          String                    @default("open")
+  lockedAt        DateTime?                 @map("locked_at")
+  lockedBy        String?                   @map("locked_by")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+
+  transactions    DriverPayoutTransaction[]
+
+  @@map("weekly_payout_summaries")
+}
+
+// 10. Driver Payout Transactions (حركات ورحلات القبض التفصيلية)
+model DriverPayoutTransaction {
+  id            String              @id
+  driverId      String              @map("driver_id")
+  driverName    String              @map("driver_name")
+  weekPeriod    String              @map("week_period")
+  date          String              @map("date")
+  amount        Float               @map("amount")
+  category      String              @map("category") // "management" | "production"
+  description   String?             @map("description")
+  vehiclePlate  String?             @map("vehicle_plate")
+  status        String              @default("paid") // "paid" | "pending" | "cancelled"
+  paymentMethod String              @default("cash") @map("payment_method") // "cash" | "transfer" | "cheque"
+  receiptNumber String?             @map("receipt_number")
+  orderIndex    Int                 @default(0) @map("order_index")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  driver        Driver              @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  weekSummary   WeeklyPayoutSummary @relation(fields: [weekPeriod], references: [weekPeriod], onDelete: Cascade)
+
+  @@index([weekPeriod])
+  @@index([driverId])
+  @@map("driver_payout_transactions")
+}
