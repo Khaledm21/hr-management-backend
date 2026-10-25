@@ -12,7 +12,7 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ) {
-  console.error(`[Error] ${req.method} ${req.url}:`, err);
+  console.error("[Error] " + req.method + " " + req.url + ":", err?.message || String(err));
 
   // Handle Zod Validation Error
   if (err instanceof ZodError) {

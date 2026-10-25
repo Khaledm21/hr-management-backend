@@ -1,4 +1,5 @@
-﻿import { prisma } from '../../db/prisma';
+import { prisma } from '../../db/prisma';
+import { logAuditEvent } from '../audit/audit.service';
 
 export interface EmployeeFilterQuery {
   page?: number;
@@ -44,6 +45,169 @@ function computeDocumentStatus(docs: {
     documentCompletenessPercentage: completeness,
     documentChecklistStatus: checklistStatus,
   };
+}
+
+
+const DEPARTMENT_CODE_MAP: Record<string, string> = {
+  // 10: Human Resources
+  'dept-hr': '10',
+  'hr': '10',
+  'human resources': '10',
+  'الموارد البشرية': '10',
+  'الموارد البشرية والشؤون الإدارية': '10',
+
+  // 20: Production Unit
+  'dept-pud': '20',
+  'pud': '20',
+  'production unit': '20',
+  'قطاع الإنتاج': '20',
+  'قطاع الإنتاج والتشغيل': '20',
+
+  // 30: Sales Dept - Fish
+  'dept-sdf': '30',
+  'sd-fish': '30',
+  'sales dept - fish': '30',
+  'مبيعات قطاع الأسماك': '30',
+
+  // 40: Sales Dept - Poultry
+  'dept-sdp': '40',
+  'sd-poultry': '40',
+  'sales dept - poultry': '40',
+  'مبيعات قطاع الدواجن': '40',
+
+  // 50: Finance Department
+  'dept-fd': '50',
+  'fd': '50',
+  'finance department': '50',
+  'finance': '50',
+  'الإدارة المالية': '50',
+  'الإدارة المالية والحسابات': '50',
+
+  // 60: Quality Control
+  'dept-qc': '60',
+  'qc': '60',
+  'quality control': '60',
+  'رقابة الجودة': '60',
+  'رقابة الجودة والمعامل': '60',
+
+  // 70: Production Dept - Fish
+  'dept-pdf': '70',
+  'pd-fish': '70',
+  'production dept - fish': '70',
+  'إنتاج الأسماك': '70',
+  'إدارة إنتاج الأسماك': '70',
+
+  // 80: Production Dept - Poultry
+  'dept-pdp': '80',
+  'pd-poultry': '80',
+  'production dept - poultry': '80',
+  'إنتاج الدواجن': '80',
+  'إدارة إنتاج الدواجن': '80',
+
+  // 90: Production Department
+  'dept-pd': '90',
+  'pd': '90',
+  'production department': '90',
+  'إدارة الإنتاج': '90',
+  'إدارة الإنتاج والتصنيع': '90',
+};
+
+async function generateDepartmentEmployeeId(departmentId?: string, departmentName?: string): Promise<string> {
+  const COMPANY_CODE = '16030';
+  let deptCode = '';
+
+  // 1. Check departmentId in DB
+  if (departmentId) {
+    const dept = await prisma.department.findUnique({ where: { id: departmentId } });
+    if (dept) {
+      const idKey = dept.id.toLowerCase();
+      const codeKey = (dept.code || '').toLowerCase();
+      const nameKey = (dept.name || '').toLowerCase();
+      const nameArKey = (dept.nameAr || '').toLowerCase();
+
+      deptCode =
+        DEPARTMENT_CODE_MAP[idKey] ||
+        DEPARTMENT_CODE_MAP[codeKey] ||
+        DEPARTMENT_CODE_MAP[nameKey] ||
+        DEPARTMENT_CODE_MAP[nameArKey] ||
+        '';
+
+      if (!deptCode) {
+        for (const [k, code] of Object.entries(DEPARTMENT_CODE_MAP)) {
+          if (nameKey.includes(k) || nameArKey.includes(k) || codeKey.includes(k)) {
+            deptCode = code;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Fallback check by raw departmentId / departmentName
+  if (!deptCode && departmentId) {
+    const key = departmentId.toLowerCase();
+    for (const [k, code] of Object.entries(DEPARTMENT_CODE_MAP)) {
+      if (key === k || key.includes(k)) {
+        deptCode = code;
+        break;
+      }
+    }
+  }
+
+  if (!deptCode && departmentName) {
+    const key = departmentName.toLowerCase();
+    for (const [k, code] of Object.entries(DEPARTMENT_CODE_MAP)) {
+      if (key === k || key.includes(k)) {
+        deptCode = code;
+        break;
+      }
+    }
+  }
+
+  // 3. Fallback: if department has existing employees with IDs matching 16030XX..., infer code
+  if (!deptCode && (departmentId || departmentName)) {
+    const existingEmp = await prisma.employee.findFirst({
+      where: {
+        OR: [
+          ...(departmentId ? [{ departmentId }] : []),
+          ...(departmentName ? [{ departmentName }] : []),
+        ],
+        employeeId: { startsWith: COMPANY_CODE },
+      },
+      select: { employeeId: true },
+    });
+    if (existingEmp && existingEmp.employeeId.length >= 7) {
+      deptCode = existingEmp.employeeId.substring(5, 7);
+    }
+  }
+
+  // 4. Default to '10' (Human Resources) if still not found
+  if (!deptCode) {
+    deptCode = '10';
+  }
+
+  const deptPrefix = `${COMPANY_CODE}${deptCode}`;
+
+  // Find all employees whose employeeId starts with this prefix
+  const matchingEmps = await prisma.employee.findMany({
+    where: {
+      employeeId: { startsWith: deptPrefix },
+    },
+    select: { employeeId: true },
+  });
+
+  let maxSeq = 0;
+  for (const emp of matchingEmps) {
+    const suffix = emp.employeeId.slice(deptPrefix.length);
+    const num = parseInt(suffix, 10);
+    if (!isNaN(num) && num > maxSeq) {
+      maxSeq = num;
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  const seqPadded = nextSeq < 100 ? String(nextSeq).padStart(2, '0') : String(nextSeq);
+  return `${deptPrefix}${seqPadded}`;
 }
 
 export class EmployeesService {
@@ -166,7 +330,10 @@ export class EmployeesService {
 
   async create(data: any) {
     const id = data.id || `emp-${Date.now()}`;
-    const employeeId = data.employeeId;
+    let employeeId = data.employeeId;
+    if (!employeeId) {
+      employeeId = await generateDepartmentEmployeeId(data.departmentId, data.departmentName);
+    }
 
     // Check Department & Position names
     let departmentName = data.departmentName;
@@ -194,6 +361,20 @@ export class EmployeesService {
       contract: data.contractDocStatus,
     });
 
+    const nid = String(data.nationalId || '').trim().replace(/[^0-9]/g, '');
+    let derivedGender = data.gender;
+    let derivedDob = data.dateOfBirth;
+    if (nid.length === 14) {
+      const century = parseInt(nid[0], 10) === 3 ? 2000 : 1900;
+      const yr = parseInt(nid.substring(1, 3), 10);
+      const mo = nid.substring(3, 5);
+      const da = nid.substring(5, 7);
+      if (!derivedDob) derivedDob = `${century + yr}-${mo}-${da}`;
+      if (!derivedGender) {
+        derivedGender = parseInt(nid[12], 10) % 2 === 0 ? 'female' : 'male';
+      }
+    }
+
     const emergencyContactStr = data.emergencyContact
       ? typeof data.emergencyContact === 'string'
         ? data.emergencyContact
@@ -212,8 +393,8 @@ export class EmployeesService {
         phone: data.phone || null,
         avatar: data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.firstName)}`,
         nationalId: data.nationalId,
-        dateOfBirth: data.dateOfBirth || null,
-        gender: data.gender || 'male',
+        dateOfBirth: derivedDob || null,
+        gender: derivedGender || 'male',
         nationality: data.nationality || 'Egyptian',
         address: data.address || null,
         emergencyContact: emergencyContactStr,
@@ -254,6 +435,16 @@ export class EmployeesService {
         position: true,
       },
     });
+
+    logAuditEvent({
+      userName: 'Khaled Mossad',
+      userRole: 'System Administrator',
+      action: 'Created Employee Record',
+      module: 'Employee Directory',
+      target: `${created.firstName} ${created.lastName} (${created.employeeId})`,
+      status: 'success',
+      details: { department: created.department?.name, salary: created.basicSalary },
+    }).catch(() => {});
 
     return {
       ...created,
@@ -313,6 +504,16 @@ export class EmployeesService {
       },
     });
 
+    logAuditEvent({
+      userName: 'Khaled Mossad',
+      userRole: 'System Administrator',
+      action: 'Updated Employee Profile',
+      module: 'Employee Directory',
+      target: `${updated.firstName} ${updated.lastName} (${updated.employeeId})`,
+      status: 'success',
+      details: updateData,
+    }).catch(() => {});
+
     return {
       ...updated,
       emergencyContact: parseEmergencyContact(updated.emergencyContact),
@@ -332,6 +533,15 @@ export class EmployeesService {
     await prisma.documentRecord.deleteMany({ where: { employeeId: existing.id } });
     await prisma.contract.deleteMany({ where: { employeeId: existing.id } });
     await prisma.employee.delete({ where: { id: existing.id } });
+
+    logAuditEvent({
+      userName: 'Khaled Mossad',
+      userRole: 'System Administrator',
+      action: 'Deleted Employee Record',
+      module: 'Employee Directory',
+      target: `${existing.firstName} ${existing.lastName} (${existing.employeeId})`,
+      status: 'warning',
+    }).catch(() => {});
 
     return true;
   }
@@ -375,28 +585,34 @@ export class EmployeesService {
       await this.deleteAll();
     }
 
-    const defaultDept = await prisma.department.findFirst();
-    const defaultPos = await prisma.position.findFirst();
-
-    const deptMap: Record<string, string> = {
-      'HR': 'dept-2',
-      'PUD': 'dept-11',
-      'FD': 'dept-3',
-      'QC': 'dept-10',
-      'SD-FISH': 'dept-5',
-      'SD-POULTRY': 'dept-5',
-      'PD-FISH': 'dept-4',
-      'PD-POULTRY': 'dept-4',
-      'PD': 'dept-4',
-      'ENG': 'dept-1',
-      'FIN': 'dept-3',
-      'SALES': 'dept-5',
-      'OPS': 'dept-8',
-      'LEGAL': 'dept-7',
-      'CS': 'dept-9',
-      'QA': 'dept-10',
-      'PROC': 'dept-11',
+    const knownDeptMetadata: Record<string, { id: string; code: string; name: string; nameAr: string; nameZh: string }> = {
+      'HR': { id: 'dept-hr', code: 'HR', name: 'Human Resources', nameAr: '??????? ??????? ??????? ????????', nameZh: '????????' },
+      'PUD': { id: 'dept-pud', code: 'PUD', name: 'Production Unit', nameAr: '???? ???????', nameZh: '???' },
+      'FD': { id: 'dept-fd', code: 'FD', name: 'Finance Department', nameAr: '??????? ???????', nameZh: '???' },
+      'QC': { id: 'dept-qc', code: 'QC', name: 'Quality Control', nameAr: '?????? ??????', nameZh: '???' },
+      'SD-FISH': { id: 'dept-sdf', code: 'SD-FISH', name: 'Sales Dept - Fish', nameAr: '????? ?????? ???????', nameZh: '?????' },
+      'SD-POULTRY': { id: 'dept-sdp', code: 'SD-POULTRY', name: 'Sales Dept - Poultry', nameAr: '????? ?????? ???????', nameZh: '?????' },
+      'PD-FISH': { id: 'dept-pdf', code: 'PD-FISH', name: 'Production Dept - Fish', nameAr: '????? ????? ???????', nameZh: '?????' },
+      'PD-POULTRY': { id: 'dept-pdp', code: 'PD-POULTRY', name: 'Production Dept - Poultry', nameAr: '????? ????? ???????', nameZh: '?????' },
+      'PD': { id: 'dept-pd', code: 'PD', name: 'Production Department', nameAr: '????? ??????? ????????', nameZh: '?????' },
     };
+
+    const allDepts = await prisma.department.findMany();
+    for (const meta of Object.values(knownDeptMetadata)) {
+      const exists = allDepts.find(d => d.code.toUpperCase() === meta.code.toUpperCase() || d.id === meta.id);
+      if (!exists) {
+        try {
+          const created = await prisma.department.create({ data: meta });
+          allDepts.push(created);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    const allPositions = await prisma.position.findMany();
+    const defaultDept = allDepts[0];
+    const defaultPos = allPositions[0];
 
     for (let i = 0; i < records.length; i++) {
       const rec = records[i];
@@ -413,53 +629,75 @@ export class EmployeesService {
           },
         });
 
-        if (existing) {
-          skippedCount++;
-          errors.push(`Row ${i + 1}: Employee ${rec.employeeId} already exists`);
-          continue;
-        }
-
         // Find or map department
         const deptVal = String(rec.department || rec.departmentName || 'HR').trim();
         const upperDept = deptVal.toUpperCase();
-        let deptId = deptMap[upperDept] || defaultDept?.id || 'dept-1';
-        let deptName = deptVal;
 
-        const deptRecord = await prisma.department.findFirst({
-          where: {
-            OR: [
-              { id: deptVal },
-              { code: deptVal },
-              { name: { contains: deptVal } },
-              { nameAr: { contains: deptVal } },
-            ],
-          },
-        });
-        if (deptRecord) {
-          deptId = deptRecord.id;
-          deptName = deptRecord.name;
+        let deptRecord = allDepts.find(d => 
+          d.code.toUpperCase() === upperDept ||
+          d.id.toUpperCase() === upperDept ||
+          d.name.toLowerCase() === deptVal.toLowerCase() ||
+          d.nameAr === deptVal
+        );
+
+        if (!deptRecord) {
+          const safeCode = upperDept.replace(/[^A-Z0-9-]/g, '').slice(0, 10) || 'GEN';
+          const safeId = `dept-${safeCode.toLowerCase()}`;
+          try {
+            deptRecord = await prisma.department.create({
+              data: {
+                id: safeId,
+                code: safeCode,
+                name: deptVal,
+                nameAr: deptVal,
+                nameZh: deptVal,
+              },
+            });
+            allDepts.push(deptRecord);
+          } catch {
+            deptRecord = defaultDept;
+          }
         }
+
+        const deptId = deptRecord?.id || defaultDept?.id;
+        const deptName = deptRecord?.name || deptVal;
 
         // Find or map position
         const posVal = String(rec.chinesePosition || rec.positionTitle || rec.position || 'Staff').trim();
-        let posId = defaultPos?.id || 'pos-01';
         let posTitle = posVal.includes('-') ? posVal.split('-')[1].trim() : posVal;
         const chinesePosition = rec.chinesePosition || posVal;
+        const posZh = posVal.includes('-') ? posVal.split('-')[0].trim() : posVal;
 
-        const posRecord = await prisma.position.findFirst({
-          where: {
-            OR: [
-              { id: posVal },
-              { code: posVal },
-              { title: { contains: posTitle } },
-              { titleZh: { contains: posVal } },
-            ],
-          },
-        });
-        if (posRecord) {
-          posId = posRecord.id;
-          posTitle = posRecord.title;
+        let posRecord = allPositions.find(p => 
+          p.title.toLowerCase() === posTitle.toLowerCase() ||
+          p.titleZh === posZh ||
+          p.titleZh === posVal ||
+          p.code.toLowerCase() === posTitle.toLowerCase()
+        );
+
+        if (!posRecord) {
+          const safePosId = `pos-${deptRecord.code.toLowerCase()}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const safePosCode = `POS-${Date.now() % 100000}-${Math.floor(Math.random() * 1000)}`;
+          try {
+            posRecord = await prisma.position.create({
+              data: {
+                id: safePosId,
+                code: safePosCode,
+                title: posTitle,
+                titleAr: posTitle,
+                titleZh: posZh,
+                departmentId: deptId,
+                departmentName: deptName,
+              },
+            });
+            allPositions.push(posRecord);
+          } catch {
+            posRecord = allPositions.find(p => p.departmentId === deptId) || defaultPos;
+          }
         }
+
+        const posId = posRecord?.id || defaultPos?.id;
+        const finalPosTitle = posRecord?.title || posTitle || 'Staff';
 
         // Real Names Extraction
         const rawFullName = String(
@@ -492,8 +730,47 @@ export class EmployeesService {
 
         const isInsured = rec.insuranceStatus === 'insured';
 
+        if (existing) {
+          await this.update(existing.id, {
+            firstName,
+            lastName,
+            arabicName,
+            chineseName: rec.chineseName || null,
+            email: rec.email || existing.email,
+            phone: rec.phone || existing.phone,
+            departmentId: deptId,
+            departmentName: deptName,
+            positionId: posId,
+            positionTitle: finalPosTitle,
+            chinesePosition,
+            hireDate: hireDateStr,
+            resignationDate: rec.resignationDate || null,
+            insuranceStatus: isInsured ? 'insured' : 'not_insured',
+            qualificationCertificateStatus: rec.qualificationCertificateStatus || (isInsured ? 'available' : 'missing'),
+            birthCertificateStatus: rec.birthCertificateStatus || (isInsured ? 'available' : 'missing'),
+            idCardStatus: rec.idCardStatus || (isInsured ? 'available' : 'missing'),
+            contractDocStatus: rec.contractDocStatus || (isInsured ? 'available' : 'missing'),
+          });
+          insertedCount++;
+          continue;
+        }
+
+        const rowNid = String(rec.nationalId || '').trim().replace(/[^0-9]/g, '');
+        let autoGender = rec.gender;
+        let autoDob = rec.dateOfBirth;
+        if (rowNid.length === 14) {
+          const c = parseInt(rowNid[0], 10) === 3 ? 2000 : 1900;
+          const y = parseInt(rowNid.substring(1, 3), 10);
+          const m = rowNid.substring(3, 5);
+          const d = rowNid.substring(5, 7);
+          if (!autoDob) autoDob = `${c + y}-${m}-${d}`;
+          if (!autoGender) autoGender = parseInt(rowNid[12], 10) % 2 === 0 ? 'female' : 'male';
+        }
+
         await this.create({
           employeeId: String(rec.employeeId),
+          gender: autoGender,
+          dateOfBirth: autoDob,
           firstName,
           lastName,
           arabicName,
@@ -504,7 +781,7 @@ export class EmployeesService {
           departmentId: deptId,
           departmentName: deptName,
           positionId: posId,
-          positionTitle: posTitle,
+          positionTitle: finalPosTitle,
           chinesePosition,
           hireDate: hireDateStr,
           resignationDate: rec.resignationDate || null,

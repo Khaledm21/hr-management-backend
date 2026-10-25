@@ -77,8 +77,8 @@ export const BatchImportSchema = z.object({
       .array(
         z.object({
           name: z.string().min(1, 'Driver name is required'),
-          vehicleType: z.enum(['ميكروباص', 'عربية فان']).optional().nullable().default('ميكروباص'),
-          vehicle_type: z.enum(['ميكروباص', 'عربية فان']).optional().nullable(),
+          vehicleType: z.string().optional().nullable().default('ميكروباص'),
+          vehicle_type: z.string().optional().nullable(),
           vehicleNumber: z.string().optional().nullable(),
           vehicle_number: z.string().optional().nullable(),
           phone: z.string().optional().nullable(),

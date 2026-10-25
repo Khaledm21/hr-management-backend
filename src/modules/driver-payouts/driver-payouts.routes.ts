@@ -12,6 +12,10 @@ import {
 const router = Router();
 
 // --- Batch Import Route (/api/driver-payouts/batch-import) ---
+// --- Clear All Data Route ---
+router.delete('/clear-all', driverPayoutsController.clearAll.bind(driverPayoutsController));
+router.post('/clear-all', driverPayoutsController.clearAll.bind(driverPayoutsController));
+
 router.post(
   '/batch-import',
   validate(BatchImportSchema),

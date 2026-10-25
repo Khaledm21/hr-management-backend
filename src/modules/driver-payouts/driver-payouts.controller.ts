@@ -167,7 +167,21 @@ export class DriverPayoutsController {
         data: result,
         importedDriversCount: result.importedDriversCount,
         importedTransactionsCount: result.importedTransactionsCount,
-        message: 'تم استيراد بيانات السائقين والعمليات بنجاح',
+        message: 'تم استيراد بيانات السائقين والمعاملات بنجاح',
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  // --- CLEAR ALL DATA ---
+  async clearAll(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await driverPayoutsService.clearAll();
+      return res.json({
+        success: true,
+        message: 'تم تصفير كافة بيانات السائقين والمعاملات بنجاح',
+        data: result,
       });
     } catch (err) {
       return next(err);

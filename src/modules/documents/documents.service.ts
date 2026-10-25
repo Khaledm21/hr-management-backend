@@ -1,4 +1,4 @@
-import { prisma } from '../../db/prisma';
+﻿import { prisma } from '../../db/prisma';
 
 export interface DocumentFilter {
   employeeId?: string;
@@ -72,6 +72,94 @@ export class DocumentsService {
     };
   }
 
+  async syncDocumentChecklist(employeeId: string, docType: string, status: 'available' | 'missing') {
+    const docTypeToMissingField: Record<string, 'qualificationCert' | 'birthCert' | 'idCard' | 'contract'> = {
+      qualification: 'qualificationCert',
+      birth_certificate: 'birthCert',
+      national_id: 'idCard',
+      contract: 'contract',
+    };
+
+    const targetField = docTypeToMissingField[docType];
+    if (!targetField || !employeeId) return;
+
+    try {
+      const targetEmployee = await prisma.employee.findFirst({
+        where: {
+          OR: [{ id: employeeId }, { employeeId: employeeId }],
+        },
+      });
+
+      if (!targetEmployee) return;
+
+      const missingDoc = await prisma.employeeMissingDocument.findFirst({
+        where: {
+          OR: [
+            { employeeCode: targetEmployee.employeeId },
+            { nationalId: targetEmployee.nationalId },
+            { id: `doc-${targetEmployee.id}` },
+          ],
+        },
+      });
+
+      const fields: Array<'qualificationCert' | 'birthCert' | 'idCard' | 'contract'> = [
+        'qualificationCert',
+        'birthCert',
+        'idCard',
+        'contract',
+      ];
+
+      let missingCount = 0;
+      if (missingDoc) {
+        for (const f of fields) {
+          const val = f === targetField ? status : (missingDoc as any)[f];
+          if (val === 'missing') missingCount++;
+        }
+
+        await prisma.employeeMissingDocument.update({
+          where: { id: missingDoc.id },
+          data: {
+            [targetField]: status,
+            missingCount,
+            status: missingCount === 0 ? 'complete' : 'incomplete',
+            notes:
+              missingCount === 0
+                ? 'جميع الأوراق ومسوغات التعيين مكتملة'
+                : `متبقي ${missingCount} مستند(ات) غير مكتملة`,
+          },
+        });
+      } else {
+        const currentQual = targetField === 'qualificationCert' ? status : (targetEmployee.qualificationCertificateStatus || 'missing');
+        const currentBirth = targetField === 'birthCert' ? status : (targetEmployee.birthCertificateStatus || 'missing');
+        const currentId = targetField === 'idCard' ? status : (targetEmployee.idCardStatus || 'missing');
+        const currentCont = targetField === 'contract' ? status : (targetEmployee.contractDocStatus || 'missing');
+
+        if (currentQual === 'missing') missingCount++;
+        if (currentBirth === 'missing') missingCount++;
+        if (currentId === 'missing') missingCount++;
+        if (currentCont === 'missing') missingCount++;
+      }
+
+      // Update employee
+      const empUpdate: any = {};
+      if (targetField === 'qualificationCert') empUpdate.qualificationCertificateStatus = status;
+      if (targetField === 'birthCert') empUpdate.birthCertificateStatus = status;
+      if (targetField === 'idCard') empUpdate.idCardStatus = status;
+      if (targetField === 'contract') empUpdate.contractDocStatus = status;
+
+      empUpdate.missingDocumentsCount = missingCount;
+      empUpdate.documentCompletenessPercentage = Math.round(((4 - missingCount) / 4) * 100);
+      empUpdate.documentChecklistStatus = missingCount === 0 ? 'complete' : 'incomplete';
+
+      await prisma.employee.update({
+        where: { id: targetEmployee.id },
+        data: empUpdate,
+      });
+    } catch (err) {
+      console.warn('syncDocumentChecklist error:', err);
+    }
+  }
+
   async create(data: any, file?: Express.Multer.File) {
     const id = data.id || `doc-${Date.now()}`;
 
@@ -112,6 +200,9 @@ export class DocumentsService {
       },
     });
 
+    // Automatically synchronize with Missing Documents checklist and Employee record
+    await this.syncDocumentChecklist(data.employeeId, data.type, 'available');
+
     return {
       ...created,
       verificationDate: created.verifiedAt || null,
@@ -132,6 +223,11 @@ export class DocumentsService {
         rejectionReason: null,
       },
     });
+
+    // Also ensure checklist is marked available
+    if (existing.employeeId && existing.type) {
+      await this.syncDocumentChecklist(existing.employeeId, existing.type, 'available');
+    }
 
     return {
       ...updated,
@@ -163,14 +259,42 @@ export class DocumentsService {
     const existing = await prisma.documentRecord.findUnique({ where: { id } });
     if (!existing) return false;
     await prisma.documentRecord.delete({ where: { id } });
+
+    // Check if employee still has another document of this type
+    if (existing.employeeId && existing.type) {
+      const remaining = await prisma.documentRecord.count({
+        where: { employeeId: existing.employeeId, type: existing.type },
+      });
+      if (remaining === 0) {
+        await this.syncDocumentChecklist(existing.employeeId, existing.type, 'missing');
+      }
+    }
+
     return true;
   }
 
   async bulkDelete(ids: string[]) {
     if (!ids || !ids.length) return 0;
+    const docs = await prisma.documentRecord.findMany({
+      where: { id: { in: ids } },
+    });
+
     const res = await prisma.documentRecord.deleteMany({
       where: { id: { in: ids } },
     });
+
+    // Re-check remaining documents for affected employees
+    for (const doc of docs) {
+      if (doc.employeeId && doc.type) {
+        const remaining = await prisma.documentRecord.count({
+          where: { employeeId: doc.employeeId, type: doc.type },
+        });
+        if (remaining === 0) {
+          await this.syncDocumentChecklist(doc.employeeId, doc.type, 'missing');
+        }
+      }
+    }
+
     return res.count;
   }
 

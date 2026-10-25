@@ -468,7 +468,12 @@ export class DriverPayoutsService {
       }
     }
 
-    // 4. Process transactions
+    // 4. Clean up existing transactions for this weekPeriod so import REPLACES rather than appends
+    await prisma.driverPayoutTransaction.deleteMany({
+      where: { weekPeriod },
+    });
+
+    // Process transactions
     let importedTransactionsCount = 0;
     const driverOrderMap = new Map<string, number>();
 
@@ -542,6 +547,13 @@ export class DriverPayoutsService {
       importedDriversCount,
       importedTransactionsCount,
     };
+  }
+
+  async clearAll() {
+    await prisma.driverPayoutTransaction.deleteMany({});
+    await prisma.weeklyPayoutSummary.deleteMany({});
+    await prisma.driver.deleteMany({});
+    return { success: true };
   }
 }
 

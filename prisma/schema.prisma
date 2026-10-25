@@ -288,3 +288,60 @@ model DriverPayoutTransaction {
   @@index([driverId])
   @@map("driver_payout_transactions")
 }
+
+// 11. جدول المستخدمين والحسابات
+model User {
+  id             String    @id @default(cuid())
+  name           String
+  email          String    @unique
+  passwordHash   String
+  role           String    @default("hr_staff") // admin, hr_manager, hr_staff, dept_manager
+  department     String    @default("Human Resources")
+  status         String    @default("active")  // active, inactive, suspended
+  avatar         String?
+  gender         String    @default("male") // 'male' | 'female'
+  lastLogin      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("users")
+}
+
+// 12. جدول مصفوفة الصلاحيات حسب الأدوار
+model RolePermission {
+  id             String    @id @default(cuid())
+  role           String    // admin, hr_manager, hr_staff, dept_manager
+  module         String    // employees, documents, insurance, contracts, attendance, leave, payroll, advances, approvals, reports, users, settings, audit_logs
+  label          String
+  canView        Boolean   @default(true)
+  canCreate      Boolean   @default(false)
+  canEdit        Boolean   @default(false)
+  canDelete      Boolean   @default(false)
+  canApprove     Boolean   @default(false)
+  canExport      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([role, module])
+  @@map("role_permissions")
+}
+
+
+// 13. جدول سجل العمليات والرقابة (Audit Trail Logs)
+model AuditLog {
+  id        String   @id @default(cuid())
+  timestamp String
+  userName  String   @map("user_name")
+  userRole  String   @map("user_role")
+  action    String
+  module    String
+  target    String
+  ipAddress String   @default("127.0.0.1") @map("ip_address")
+  status    String   @default("success") // success | warning | failed
+  details   String?  // JSON string
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([module])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

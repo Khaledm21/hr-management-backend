@@ -278,6 +278,10 @@ async function main() {
   const { seedDriversAndPayouts } = await import('../src/db/seed_drivers');
   await seedDriversAndPayouts();
 
+  // 11. Seed Master Admin and Role Permissions
+  const { seedAuthAndPermissions } = await import('../src/db/seed_auth');
+  await seedAuthAndPermissions();
+
   console.log('🎉 Seeding successfully completed!');
 }
 
