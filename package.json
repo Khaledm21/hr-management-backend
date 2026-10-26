@@ -12,7 +12,8 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "seed": "tsx prisma/seed.ts",
     "test:api": "tsx src/db/verify_endpoints.ts",
-    "test:auth": "tsx src/db/verify_auth.ts"
+    "test:auth": "tsx src/db/verify_auth.ts",
+    "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
