@@ -97,63 +97,74 @@ export class InsuranceService {
     };
   }
 
-  async importSocialInsurance(records: any[]) {
+  async importSocialInsurance(records: any[], overwrite = false) {
     let insertedCount = 0;
     let skippedCount = 0;
     const errors: string[] = [];
 
+    if (overwrite) {
+      await prisma.socialInsurance.deleteMany({}).catch(() => {});
+    }
+
     const existingCount = await prisma.socialInsurance.count();
     let serialNo = existingCount + 1;
 
-    for (let i = 0; i < records.length; i++) {
-      const r = records[i];
-      try {
-        if (!r.nationalId || !r.employeeName) {
-          skippedCount++;
-          errors.push(`Row ${i + 1}: Missing nationalId or employeeName`);
-          continue;
-        }
+    // Load existing employees to match nationalId in memory
+    const allEmps = await prisma.employee.findMany({
+      select: { id: true, nationalId: true, employeeId: true, departmentName: true },
+    });
+    const empByNationalId = new Map(allEmps.filter(e => e.nationalId).map(e => [e.nationalId, e]));
 
-        const id = r.id || `soc-ins-${Date.now()}-${i}`;
-        const salary = Number(r.insuranceSalary || 4325.0);
-        const worker = Number((salary * 0.11).toFixed(2));
-        const company = Number((salary * 0.1875).toFixed(2));
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const slice = records.slice(i, i + BATCH_SIZE);
+      await Promise.all(slice.map(async (r, offset) => {
+        const idx = i + offset;
+        try {
+          if (!r.nationalId || !r.employeeName) {
+            skippedCount++;
+            errors.push(`Row ${idx + 1}: Missing nationalId or employeeName`);
+            return;
+          }
 
-        // Check if nationalId matches existing employee
-        const emp = await prisma.employee.findUnique({
-          where: { nationalId: String(r.nationalId) },
-        });
+          const id = r.id || `soc-ins-${Date.now()}-${idx}`;
+          const salary = Number(r.insuranceSalary || 4325.0);
+          const worker = Number((salary * 0.11).toFixed(2));
+          const company = Number((salary * 0.1875).toFixed(2));
 
-        await prisma.socialInsurance.create({
-          data: {
-            id,
-            serialNo: Number(r.serialNo) || serialNo++,
-            nationalId: String(r.nationalId),
-            employeeName: r.employeeName,
-            department: r.department || (emp ? emp.departmentName : 'Operations'),
-            insuranceNumber: String(r.insuranceNumber || '000000'),
-            insuranceSalary: salary,
-            workerShare: worker,
-            companyShare: company,
-            totalContribution: Number((worker + company).toFixed(2)),
-            note: r.note || null,
-            employeeListStatus: emp ? 'found' : 'not_found',
-            employeeCode: emp ? emp.employeeId : null,
-          },
-        });
+          const emp = empByNationalId.get(String(r.nationalId).trim());
 
-        if (emp) {
-          await prisma.employee.update({
-            where: { id: emp.id },
-            data: { insuranceStatus: 'insured' },
+          await prisma.socialInsurance.create({
+            data: {
+              id,
+              serialNo: Number(r.serialNo) || (serialNo + idx),
+              nationalId: String(r.nationalId),
+              employeeName: r.employeeName,
+              department: r.department || (emp ? emp.departmentName : 'Operations'),
+              insuranceNumber: String(r.insuranceNumber || '000000'),
+              insuranceSalary: salary,
+              workerShare: worker,
+              companyShare: company,
+              totalContribution: Number((worker + company).toFixed(2)),
+              note: r.note || null,
+              employeeListStatus: emp ? 'found' : 'not_found',
+              employeeCode: emp ? emp.employeeId : null,
+            },
           });
-        }
 
-        insertedCount++;
-      } catch (err: any) {
-        skippedCount++;
-        errors.push(`Row ${i + 1}: ${err.message}`);
-      }
+          if (emp) {
+            await prisma.employee.update({
+              where: { id: emp.id },
+              data: { insuranceStatus: 'insured' },
+            }).catch(() => {});
+          }
+
+          insertedCount++;
+        } catch (err) {
+          skippedCount++;
+          errors.push(`Row ${idx + 1}: ${err.message}`);
+        }
+      }));
     }
 
     return {
@@ -260,62 +271,70 @@ export class InsuranceService {
     return updated;
   }
 
-  async importMissingDocuments(records: any[]) {
+  async importMissingDocuments(records: any[], overwrite = false) {
     let insertedCount = 0;
     let skippedCount = 0;
     const errors: string[] = [];
 
+    if (overwrite) {
+      await prisma.employeeMissingDocument.deleteMany({}).catch(() => {});
+    }
+
     const existingCount = await prisma.employeeMissingDocument.count();
     let serialNo = existingCount + 1;
 
-    for (let i = 0; i < records.length; i++) {
-      const r = records[i];
-      try {
-        if (!r.employeeName || !r.employeeCode) {
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const slice = records.slice(i, i + BATCH_SIZE);
+      await Promise.all(slice.map(async (r, offset) => {
+        const idx = i + offset;
+        try {
+          if (!r.employeeName || !r.employeeCode) {
+            skippedCount++;
+            errors.push(`Row ${idx + 1}: Missing employeeName or employeeCode`);
+            return;
+          }
+
+          const id = r.id || `doc-req-${Date.now()}-${idx}`;
+          const qual = r.qualificationCert || 'missing';
+          const birth = r.birthCert || 'missing';
+          const idCard = r.idCard || 'missing';
+          const contract = r.contract || 'missing';
+
+          let missingCount = 0;
+          if (qual === 'missing') missingCount++;
+          if (birth === 'missing') missingCount++;
+          if (idCard === 'missing') missingCount++;
+          if (contract === 'missing') missingCount++;
+
+          await prisma.employeeMissingDocument.create({
+            data: {
+              id,
+              serialNo: Number(r.serialNo) || (serialNo + idx),
+              department: r.department || 'Operations',
+              employeeName: r.employeeName,
+              nationalId: String(r.nationalId || ''),
+              position: r.position || 'Staff',
+              startDate: r.startDate || null,
+              resignationDate: r.resignationDate || null,
+              employeeCode: String(r.employeeCode),
+              insuranceStatus: r.insuranceStatus || 'not_insured',
+              qualificationCert: qual,
+              birthCert: birth,
+              idCard: idCard,
+              contract: contract,
+              missingCount,
+              notes: r.notes || null,
+              status: missingCount === 0 ? 'complete' : 'incomplete',
+            },
+          });
+
+          insertedCount++;
+        } catch (err) {
           skippedCount++;
-          errors.push(`Row ${i + 1}: Missing employeeName or employeeCode`);
-          continue;
+          errors.push(`Row ${idx + 1}: ${err.message}`);
         }
-
-        const id = r.id || `doc-req-${Date.now()}-${i}`;
-        const qual = r.qualificationCert || 'missing';
-        const birth = r.birthCert || 'missing';
-        const idCard = r.idCard || 'missing';
-        const contract = r.contract || 'missing';
-
-        let missingCount = 0;
-        if (qual === 'missing') missingCount++;
-        if (birth === 'missing') missingCount++;
-        if (idCard === 'missing') missingCount++;
-        if (contract === 'missing') missingCount++;
-
-        await prisma.employeeMissingDocument.create({
-          data: {
-            id,
-            serialNo: Number(r.serialNo) || serialNo++,
-            department: r.department || 'Operations',
-            employeeName: r.employeeName,
-            nationalId: String(r.nationalId || '00000000000000'),
-            position: r.position || 'Staff',
-            startDate: r.startDate || null,
-            resignationDate: r.resignationDate || null,
-            employeeCode: String(r.employeeCode),
-            insuranceStatus: r.insuranceStatus || 'not_insured',
-            qualificationCert: qual,
-            birthCert: birth,
-            idCard: idCard,
-            contract: contract,
-            missingCount,
-            notes: r.notes || null,
-            status: missingCount === 0 ? 'complete' : 'incomplete',
-          },
-        });
-
-        insertedCount++;
-      } catch (err: any) {
-        skippedCount++;
-        errors.push(`Row ${i + 1}: ${err.message}`);
-      }
+      }));
     }
 
     return {
