@@ -1,3 +1,12 @@
+
+function getGenderAvatarUrl(firstName: string, gender?: string): string {
+  const seed = encodeURIComponent(firstName || 'User');
+  if (gender === 'female') {
+    return `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}&facialHairProbability=0&top=longButNotTooLong,straight01,straight02,curly,curvy,bob,bun,miaWallace`;
+  }
+  return `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}&top=shortFlat,shortRound,shortWaved,sides,theCaesar,theCaesarAndSidePart,shortCurly`;
+}
+
 import { prisma } from '../../db/prisma';
 import { logAuditEvent } from '../audit/audit.service';
 
@@ -218,34 +227,39 @@ export class EmployeesService {
 
     const where: any = {};
 
+    const andConditions: any[] = [];
+
     // 1. Search Query
     if (query.search) {
       const q = query.search.trim();
-      where.OR = [
-        { employeeId: { contains: q } },
-        { firstName: { contains: q } },
-        { lastName: { contains: q } },
-        { arabicName: { contains: q } },
-        { chineseName: { contains: q } },
-        { email: { contains: q } },
-        { phone: { contains: q } },
-        { nationalId: { contains: q } },
-        { positionTitle: { contains: q } },
-        { chinesePosition: { contains: q } },
-      ];
+      andConditions.push({
+        OR: [
+          { employeeId: { contains: q } },
+          { firstName: { contains: q } },
+          { lastName: { contains: q } },
+          { arabicName: { contains: q } },
+          { chineseName: { contains: q } },
+          { email: { contains: q } },
+          { phone: { contains: q } },
+          { nationalId: { contains: q } },
+          { positionTitle: { contains: q } },
+          { chinesePosition: { contains: q } },
+        ],
+      });
     }
 
     // 2. Department filter
     if (query.departmentId && query.departmentId !== 'all') {
-      where.OR = where.OR || [];
-      where.AND = [
-        {
-          OR: [
-            { departmentId: query.departmentId },
-            { departmentName: query.departmentId },
-          ],
-        },
-      ];
+      andConditions.push({
+        OR: [
+          { departmentId: query.departmentId },
+          { departmentName: query.departmentId },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
     }
 
     // 3. Employment Status filter
@@ -391,7 +405,7 @@ export class EmployeesService {
         chineseName: data.chineseName || null,
         email: data.email || null,
         phone: data.phone || null,
-        avatar: data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(data.firstName)}`,
+        avatar: data.avatar || getGenderAvatarUrl(data.firstName, derivedGender || data.gender),
         nationalId: data.nationalId,
         dateOfBirth: derivedDob || null,
         gender: derivedGender || 'male',
@@ -795,7 +809,7 @@ export class EmployeesService {
             nationalId: strNatId,
             email: rec.email || `emp.${strEmpId}@company.com`,
             phone: rec.phone || null,
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firstName)}`,
+            avatar: getGenderAvatarUrl(firstName, autoGender || 'male'),
             departmentId: deptId,
             departmentName: deptName,
             positionId: posId,
