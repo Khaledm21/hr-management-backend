@@ -72,7 +72,7 @@ export class InsuranceService {
     const totalInsuranceWage = aggregates._sum.insuranceSalary ?? 0;
     const totalWorkerContributions = aggregates._sum.workerShare ?? 0;
     const totalCompanyContributions = aggregates._sum.companyShare ?? 0;
-    const totalContributions = aggregates._sum.totalContribution ?? (totalWorkerContributions + totalCompanyContributions);
+    const totalContributions = Number((totalWorkerContributions + totalCompanyContributions).toFixed(2));
     const notInsuredCount = Math.max(0, totalEmployees - foundCount);
 
     return {
@@ -90,7 +90,7 @@ export class InsuranceService {
       totalWorkerShare: Number(totalWorkerContributions.toFixed(2)),
       totalCompanyShare: Number(totalCompanyContributions.toFixed(2)),
       totalContributions: Number(totalContributions.toFixed(2)),
-      standardWage: 4325.0,
+      standardWage: foundCount > 0 ? Number((totalInsuranceWage / foundCount).toFixed(2)) : 0,
       workerRate: 0.11,
       companyRate: 0.1875,
       completenessRate: totalEmployees > 0 ? Math.round((foundCount / totalEmployees) * 100) : 0,
@@ -128,9 +128,27 @@ export class InsuranceService {
           }
 
           const id = r.id || `soc-ins-${Date.now()}-${idx}`;
-          const salary = Number(r.insuranceSalary || 4325.0);
-          const worker = Number((salary * 0.11).toFixed(2));
-          const company = Number((salary * 0.1875).toFixed(2));
+          const rawSalary = String(r.insuranceSalary ?? '').replace(/,/g, '').trim();
+          const parsedSalary = parseFloat(rawSalary);
+          const salary = !isNaN(parsedSalary) ? parsedSalary : 0;
+          
+          const rawWorker = String(r.workerShare ?? '').replace(/,/g, '').trim();
+          const parsedWorker = parseFloat(rawWorker);
+          const worker = r.workerShare !== undefined && r.workerShare !== null && rawWorker !== '' && !isNaN(parsedWorker)
+            ? parsedWorker
+            : Number((salary * 0.11).toFixed(2));
+
+          const rawCompany = String(r.companyShare ?? '').replace(/,/g, '').trim();
+          const parsedCompany = parseFloat(rawCompany);
+          const company = r.companyShare !== undefined && r.companyShare !== null && rawCompany !== '' && !isNaN(parsedCompany)
+            ? parsedCompany
+            : Number((salary * 0.1875).toFixed(2));
+
+          const rawTotal = String(r.totalContribution ?? '').replace(/,/g, '').trim();
+          const parsedTotal = parseFloat(rawTotal);
+          const totalContribution = r.totalContribution !== undefined && r.totalContribution !== null && rawTotal !== '' && !isNaN(parsedTotal)
+            ? parsedTotal
+            : Number((worker + company).toFixed(2));
 
           const emp = empByNationalId.get(String(r.nationalId).trim());
 
@@ -145,7 +163,7 @@ export class InsuranceService {
               insuranceSalary: salary,
               workerShare: worker,
               companyShare: company,
-              totalContribution: Number((worker + company).toFixed(2)),
+              totalContribution: totalContribution,
               note: r.note || null,
               employeeListStatus: emp ? 'found' : 'not_found',
               employeeCode: emp ? emp.employeeId : null,

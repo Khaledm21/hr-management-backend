@@ -30,13 +30,14 @@ export class InsuranceController {
   async importSocialInsurance(req: Request, res: Response, next: NextFunction) {
     try {
       const records = req.body.records || req.body;
+      const overwrite = Boolean(req.body.overwrite);
       if (!Array.isArray(records)) {
         return res.status(400).json({
           success: false,
           message: 'Expected records array in request body',
         });
       }
-      const result = await insuranceService.importSocialInsurance(records);
+      const result = await insuranceService.importSocialInsurance(records, overwrite);
       return res.json(result);
     } catch (err) {
       return next(err);
