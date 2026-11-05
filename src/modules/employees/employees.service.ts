@@ -401,7 +401,7 @@ export class EmployeesService {
         employeeId,
         firstName: data.firstName,
         lastName: data.lastName,
-        arabicName: data.arabicName || `${data.firstName} ${data.lastName}`,
+        arabicName: data.arabicName ? String(data.arabicName).trim() : `${data.firstName} ${data.lastName}`,
         chineseName: data.chineseName || null,
         email: data.email || null,
         phone: data.phone || null,
@@ -477,6 +477,13 @@ export class EmployeesService {
 
     const updateData: any = { ...updates };
     delete updateData.id;
+
+    if (updates.arabicName !== undefined) {
+      updateData.arabicName =
+        updates.arabicName !== null && typeof updates.arabicName === 'string'
+          ? updates.arabicName.trim()
+          : updates.arabicName;
+    }
 
     if (updates.emergencyContact) {
       updateData.emergencyContact =
@@ -581,6 +588,82 @@ export class EmployeesService {
       where: { id: { in: foundIds } },
     });
     return res.count;
+  }
+
+  async bulkUpdateArabicNames(updates: Array<{ id?: string; employeeId?: string; arabicName?: string | null }>): Promise<number> {
+    if (!updates || !Array.isArray(updates) || updates.length === 0) {
+      return 0;
+    }
+
+    // 1. Gather all unique non-empty identifiers
+    const searchKeys = Array.from(
+      new Set(
+        updates
+          .map(u => String(u.id || u.employeeId || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (searchKeys.length === 0) {
+      return 0;
+    }
+
+    // 2. Fetch existing employees to resolve IDs
+    const existingEmployees = await prisma.employee.findMany({
+      where: {
+        OR: [
+          { id: { in: searchKeys } },
+          { employeeId: { in: searchKeys } },
+        ],
+      },
+      select: { id: true, employeeId: true },
+    });
+
+    const keyToIdMap = new Map<string, string>();
+    for (const emp of existingEmployees) {
+      keyToIdMap.set(emp.id, emp.id);
+      keyToIdMap.set(emp.employeeId, emp.id);
+    }
+
+    // 3. Map updates by real employee id, preserving latest update for duplicates
+    const updatesByRealId = new Map<string, string | null>();
+    for (const item of updates) {
+      const key = String(item.id || item.employeeId || '').trim();
+      const realId = keyToIdMap.get(key);
+      if (realId && item.arabicName !== undefined) {
+        const arabicName =
+          item.arabicName !== null && typeof item.arabicName === 'string'
+            ? item.arabicName.trim()
+            : (item.arabicName || null);
+        updatesByRealId.set(realId, arabicName);
+      }
+    }
+
+    if (updatesByRealId.size === 0) {
+      return 0;
+    }
+
+    // 4. Perform atomic batch update transaction
+    await prisma.$transaction(
+      Array.from(updatesByRealId.entries()).map(([id, arabicName]) =>
+        prisma.employee.update({
+          where: { id },
+          data: { arabicName },
+        })
+      )
+    );
+
+    logAuditEvent({
+      userName: 'Khaled Mossad',
+      userRole: 'System Administrator',
+      action: 'Bulk Updated Employee Arabic Names',
+      module: 'Employee Directory',
+      target: `${updatesByRealId.size} Employees`,
+      status: 'success',
+      details: { count: updatesByRealId.size },
+    }).catch(() => {});
+
+    return updatesByRealId.size;
   }
 
   async deleteAll() {

@@ -56,3 +56,17 @@ export const BatchImportEmployeeSchema = z.object({
     records: z.array(z.record(z.any())).min(1, 'At least one record is required'),
   }),
 });
+
+export const BulkArabicNamesSchema = z.object({
+  body: z.object({
+    updates: z.array(
+      z.object({
+        id: z.string().optional(),
+        employeeId: z.string().optional(),
+        arabicName: z.string().nullable().optional(),
+      }).refine((data) => !!(data.id || data.employeeId), {
+        message: 'Each item must have an id or employeeId',
+      })
+    ).min(1, 'At least one update item is required'),
+  }),
+});

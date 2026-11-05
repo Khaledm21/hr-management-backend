@@ -13,6 +13,7 @@
     "seed": "tsx prisma/seed.ts",
     "test:api": "tsx src/db/verify_endpoints.ts",
     "test:auth": "tsx src/db/verify_auth.ts",
+    "test:arabic-names": "tsx src/db/verify_arabic_name.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

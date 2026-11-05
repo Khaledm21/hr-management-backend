@@ -1,4 +1,4 @@
-﻿import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { employeesService } from './employees.service';
 
 export class EmployeesController {
@@ -83,6 +83,27 @@ export class EmployeesController {
       return res.json({
         success: true,
         message: 'Employee deleted successfully',
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  async bulkUpdateArabicNames(req: Request, res: Response, next: NextFunction) {
+    try {
+      const updates = Array.isArray(req.body) ? req.body : req.body.updates;
+      if (!Array.isArray(updates)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid updates payload: expected updates array',
+        });
+      }
+
+      const count = await employeesService.bulkUpdateArabicNames(updates);
+      return res.json({
+        success: true,
+        count,
+        message: `${count} employee Arabic names updated successfully`,
       });
     } catch (err) {
       return next(err);
